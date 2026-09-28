@@ -1,0 +1,54 @@
+<Publish>
+  <!--
+    WARNING: this file is destructive.
+
+    PrepareMetadata calls WithForumLinks, WithExternalLinks, WithDependencies and WithTags
+    UNCONDITIONALLY. Anything not declared here is sent as an empty set and WIPED from the live
+    listing - including values added through the website. Screenshots are the only exception
+    (WithScreenshots is skipped on an empty set), so website-uploaded screenshots survive.
+
+    So: this file is the single source of truth. If you add a link, a tag or a dependency on the
+    website, copy it back in here before the next publish, or the next publish deletes it.
+
+    Published as 161180 on 2026-09-28 (1.0.0). From now on NewVersion / Update are the commands.
+  -->
+  <ModId Value="161180" />
+  <DisplayName Value="Straight Train Stop" />
+  <ShortDescription Value="Removes the lane changes at a station's track ends, so long trains stop straight on their platform." />
+  <LongDescription>
+# Straight Train Stop
+
+*stupid trains where they think they're going*
+
+## How to use
+
+- Select a railway station and open **Visual Customisation**.
+- **Straight-only platforms** lists the station's platform tracks, with a switch for each end (left and right as seen from the station's street side).
+- Switch an end on to remove its lane changes: trains reach that platform only straight on. The junction itself stays.
+- The switch at the top sets every end at once.
+- Only the station's own tracks change: tracks you placed yourself, metro and tram are never touched.
+- A lane change with a train on it goes once the train has passed. Choices are saved with the city.
+
+## Before you install
+
+Removed lane changes are not part of the save. If you uninstall the mod, a station you changed stays without them until its tracks are regenerated, for example by upgrading or rebuilding the station. Switch every station off before uninstalling to avoid this.
+
+Free and open source under the MIT licence: [source on GitHub](https://github.com/merrinaf-tech/Straight-Train-Stop).
+  </LongDescription>
+  <Thumbnail Value="Properties/Thumbnail.png" />
+  <!-- Once declared here this file governs the screenshots: remove a line and the next
+       publish removes the picture. -->
+  <Screenshot Value="Properties/Screenshots/straight-train-stop-01.png" />
+  <Tag Value="Code Mod" />
+
+  <ForumLink Value="https://forum.paradoxplaza.com/forum/threads/straight-train-stop-mod.1943001/" />
+
+  <ExternalLink Type="github" Url="https://github.com/merrinaf-tech/Straight-Train-Stop" />
+  <ExternalLink Type="kofi" Url="https://ko-fi.com/fabiozsche" />
+  <ModVersion Value="1.0.0" />
+  <GameVersion Value="1.6.*" />
+  <AccessLevel Value="Public" />
+  <!-- Only the changes of the next version; 1.0.0's line is live and already read. -->
+  <ChangeLog>
+  </ChangeLog>
+</Publish>

@@ -1,0 +1,13 @@
+# Build output
+bin/
+obj/
+Library/
+*.zip
+*.user
+*.suo
+
+# Development workbench: notes, backups, logs, reference code. Never published.
+_dev/
+
+# Source art: the exported PNG is versioned, the layered original is not
+Pic/*.psd

@@ -1,0 +1,76 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Library</OutputType>
+    <TargetFramework>net48</TargetFramework>
+    <LangVersion>latest</LangVersion>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>disable</ImplicitUsings>
+    <AssemblyName>StraightTrainStop</AssemblyName>
+    <RootNamespace>StraightTrainStop</RootNamespace>
+    <Product>Straight Train Stop</Product>
+    <Version>1.0.0</Version>
+    <AssemblyVersion>1.0.0.0</AssemblyVersion>
+    <FileVersion>1.0.0.0</FileVersion>
+    <AppendTargetFrameworkToOutputPath>false</AppendTargetFrameworkToOutputPath>
+    <ProduceReferenceAssembly>false</ProduceReferenceAssembly>
+    <GenerateDocumentationFile>false</GenerateDocumentationFile>
+    <CopyLocalLockFileAssemblies>false</CopyLocalLockFileAssemblies>
+    <SatelliteResourceLanguages>en</SatelliteResourceLanguages>
+    <PublishConfigurationPath>Properties\PublishConfiguration.xml</PublishConfigurationPath>
+  </PropertyGroup>
+
+  <PropertyGroup Condition="'$(Configuration)' == 'Release'">
+    <Optimize>true</Optimize>
+    <DebugType>portable</DebugType>
+    <DebugSymbols>true</DebugSymbols>
+    <Deterministic>true</Deterministic>
+    <PathMap>$(MSBuildProjectDirectory)=StraightTrainStop</PathMap>
+  </PropertyGroup>
+
+  <PropertyGroup>
+    <CsiiToolPath>$([System.Environment]::GetEnvironmentVariable('CSII_TOOLPATH', 'EnvironmentVariableTarget.User'))</CsiiToolPath>
+  </PropertyGroup>
+
+  <Import Project="$(CsiiToolPath)\Mod.props" />
+  <Import Project="$(CsiiToolPath)\Mod.targets" />
+
+  <ItemGroup>
+    <Reference Include="Game"><HintPath>$(ManagedPath)\Game.dll</HintPath><Private>false</Private></Reference>
+    <Reference Include="Colossal.Core"><HintPath>$(ManagedPath)\Colossal.Core.dll</HintPath><Private>false</Private></Reference>
+    <Reference Include="Colossal.Logging"><HintPath>$(ManagedPath)\Colossal.Logging.dll</HintPath><Private>false</Private></Reference>
+    <Reference Include="Colossal.Mathematics"><HintPath>$(ManagedPath)\Colossal.Mathematics.dll</HintPath><Private>false</Private></Reference>
+    <Reference Include="Colossal.UI"><HintPath>$(ManagedPath)\Colossal.UI.dll</HintPath><Private>false</Private></Reference>
+    <Reference Include="Colossal.UI.Binding"><HintPath>$(ManagedPath)\Colossal.UI.Binding.dll</HintPath><Private>false</Private></Reference>
+    <Reference Include="Unity.Collections"><HintPath>$(ManagedPath)\Unity.Collections.dll</HintPath><Private>false</Private></Reference>
+    <Reference Include="Unity.Entities"><HintPath>$(ManagedPath)\Unity.Entities.dll</HintPath><Private>false</Private></Reference>
+    <Reference Include="Unity.Mathematics"><HintPath>$(ManagedPath)\Unity.Mathematics.dll</HintPath><Private>false</Private></Reference>
+    <Reference Include="Unity.Burst"><HintPath>$(ManagedPath)\Unity.Burst.dll</HintPath><Private>false</Private></Reference>
+    <Reference Include="UnityEngine.CoreModule"><HintPath>$(ManagedPath)\UnityEngine.CoreModule.dll</HintPath><Private>false</Private></Reference>
+  </ItemGroup>
+
+  <ItemGroup>
+    <None Include="Properties\PublishConfiguration.xml" />
+  </ItemGroup>
+
+  <Target Name="CopyUiModule" AfterTargets="RunModPostProcessor" BeforeTargets="DeployWIP">
+    <Copy SourceFiles="$(MSBuildProjectDirectory)/UI/StraightTrainStop.mjs" DestinationFolder="$(OutDir)" />
+  </Target>
+
+  <Target Name="RemoveSymbolsBeforeDeploy" AfterTargets="RunModPostProcessor" BeforeTargets="DeployWIP">
+    <ItemGroup>
+      <SymbolsToStrip Include="$(OutDir)**\*.pdb" />
+      <SymbolsToStrip Include="$(OutDir)**\*.xml" />
+    </ItemGroup>
+    <Delete Files="@(SymbolsToStrip)" />
+  </Target>
+
+  <Target Name="RefuseWhileGameRunning" BeforeTargets="BeforeBuild"
+          Condition="'$(OS)' == 'Windows_NT' AND '$(SkipGameRunningCheck)' != 'true'">
+    <Exec Command="powershell -NoProfile -Command &quot;$p = Get-Process Cities2 -ErrorAction SilentlyContinue; if ($p) { exit 1 } else { exit 0 }&quot;"
+          ContinueOnError="true" StandardOutputImportance="low" StandardErrorImportance="low">
+      <Output TaskParameter="ExitCode" PropertyName="Cities2Running" />
+    </Exec>
+    <Error Condition="'$(Cities2Running)' != '0'"
+           Text="Cities Skylines II is running. Close the game before building or deploying this mod." />
+  </Target>
+</Project>
