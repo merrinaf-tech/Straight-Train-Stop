@@ -48,7 +48,9 @@ Free and open source under the MIT licence: [source on GitHub](https://github.co
   <ModVersion Value="1.0.0" />
   <GameVersion Value="1.6.*" />
   <AccessLevel Value="Public" />
-  <!-- Only the changes of the next version; 1.0.0's line is live and already read. -->
+  <!-- The live version's changes. Update refuses an empty ChangeLog, so this keeps 1.0.0's
+       line until the next NewVersion, which replaces it with that version's changes only. -->
   <ChangeLog>
+- Per-track, per-end switches to remove the lane changes at a station.
   </ChangeLog>
 </Publish>
