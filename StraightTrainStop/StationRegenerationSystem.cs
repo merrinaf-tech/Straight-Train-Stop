@@ -9,10 +9,12 @@ namespace StraightTrainStop
 {
 
 /// <summary>
-/// Marks a station's net edges and nodes updated on request, so LaneSystem regenerates the
-/// station's lanes. StationJunctionLockSystem then removes the lane changes of the enabled track
-/// ends, and a switched-off end simply gets them back. Runs in Modification1, ahead of LaneSystem
-/// (Modification4) in the same frame.
+/// Marks a station's railway edges and their nodes updated on request, so LaneSystem regenerates
+/// the station's track lanes. Roads, paths and other nets of the station and its upgrades are left
+/// alone: updating all of them right after a load is the likely reason a station lost its road
+/// connection after a reload. StationJunctionLockSystem then removes the lane changes of the
+/// enabled track ends, and a switched-off end simply gets them back. Runs in Modification1, ahead
+/// of LaneSystem (Modification4) in the same frame.
 /// </summary>
 public sealed partial class StationRegenerationSystem : GameSystemBase
 {
@@ -52,9 +54,19 @@ public sealed partial class StationRegenerationSystem : GameSystemBase
 
         var owners = new HashSet<Entity>();
         StationNets.Collect(EntityManager, station, owners);
+        var tracks = new HashSet<Entity>();
         foreach (Entity owner in owners)
-            if (EntityManager.Exists(owner) && !EntityManager.HasComponent<Updated>(owner))
-                EntityManager.AddComponent<Updated>(owner);
+        {
+            if (!EntityManager.HasComponent<Game.Net.Edge>(owner) || !StationLayout.HasTrainTrack(EntityManager, owner))
+                continue;
+            Game.Net.Edge ends = EntityManager.GetComponentData<Game.Net.Edge>(owner);
+            tracks.Add(owner);
+            tracks.Add(ends.m_Start);
+            tracks.Add(ends.m_End);
+        }
+        foreach (Entity net in tracks)
+            if (EntityManager.Exists(net) && !EntityManager.HasComponent<Updated>(net))
+                EntityManager.AddComponent<Updated>(net);
     }
 }
 

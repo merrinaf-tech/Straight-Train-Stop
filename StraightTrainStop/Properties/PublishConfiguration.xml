@@ -22,18 +22,11 @@
 
 ## How to use
 
-- Select a railway station and open **Visual Customisation**.
-- **Straight-only platforms** lists the station's platform tracks, with a switch for each end (left and right as seen from the station's street side).
-- Switch an end on to remove its lane changes: trains reach that platform only straight on. The junction itself stays.
-- The switch at the top sets every end at once.
-- Only the station's own tracks change: tracks you placed yourself, metro and tram are never touched.
-- A lane change with a train on it goes once the train has passed. Choices are saved with the city.
+Select a railway station: **Straight-only platforms** is under Visual Customisation, or in the info panel. Switch on a track end and trains reach that platform only straight on. Choices are saved with the city.
 
 ## Before you install
 
 Removed lane changes are not part of the save. If you uninstall the mod, a station you changed stays without them until its tracks are regenerated, for example by upgrading or rebuilding the station. Switch every station off before uninstalling to avoid this.
-
-Free and open source under the MIT licence: [source on GitHub](https://github.com/merrinaf-tech/Straight-Train-Stop).
   </LongDescription>
   <Thumbnail Value="Properties/Thumbnail.png" />
   <!-- Once declared here this file governs the screenshots: remove a line and the next
@@ -45,12 +38,15 @@ Free and open source under the MIT licence: [source on GitHub](https://github.co
 
   <ExternalLink Type="github" Url="https://github.com/merrinaf-tech/Straight-Train-Stop" />
   <ExternalLink Type="kofi" Url="https://ko-fi.com/fabiozsche" />
-  <ModVersion Value="1.0.0" />
+  <ModVersion Value="1.0.1" />
   <GameVersion Value="1.6.*" />
   <AccessLevel Value="Public" />
-  <!-- The live version's changes. Update refuses an empty ChangeLog, so this keeps 1.0.0's
-       line until the next NewVersion, which replaces it with that version's changes only. -->
+  <!-- The live version's changes. Update refuses an empty ChangeLog, so after a NewVersion these
+       lines stay until the next one replaces them with that version's changes only. -->
   <ChangeLog>
-- Per-track, per-end switches to remove the lane changes at a station.
+- Only passenger platforms get a row; depot and yard tracks are left alone.
+- Stations keep their road connection after reloading.
+- Stations without Visual Customisation show the switches in the info panel.
+- Terminals show a far and a street end, with no switch at the buffer stops.
   </ChangeLog>
 </Publish>

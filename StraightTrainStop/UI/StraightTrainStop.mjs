@@ -3,13 +3,15 @@
  *
  * Id: StraightTrainStop
  * Author: Fabiozsche
- * Version: 1.0.0
+ * Version: 1.0.1
  * Dependencies:
  */
 
 const GROUP = "straightTrainStop";
 const SECTIONS = "game-ui/game/components/selected-info-panel/selected-info-sections/selected-info-sections.tsx";
 const VISUAL_CUSTOMISATION = "Game.UI.InGame.VisualCustomizeSection";
+// Our own info section, shown instead on stations that have no Visual Customisation.
+const OWN_SECTION = "StraightTrainStop.StationTracksSection";
 
 const React = window.React;
 const api = window["cs2/api"];
@@ -17,8 +19,8 @@ const h = React.createElement;
 
 const stationSelected$ = api.bindValue(GROUP, "stationSelected", false);
 const tracks$ = api.bindValue(GROUP, "tracks", "[]");
-const removedCount$ = api.bindValue(GROUP, "removedCount", 0);
 const status$ = api.bindValue(GROUP, "junctionStatus", "");
+const endsFaceStreet$ = api.bindValue(GROUP, "endsFaceStreet", false);
 
 // Same inset and width as the game's palette box above it in Visual Customisation.
 const cardStyle = {
@@ -36,14 +38,13 @@ const headerStyle = {
   alignItems: "center",
   width: "334rem",
 };
-const copyStyle = { width: "270rem", flexGrow: 0, flexShrink: 0, paddingRight: "12rem", boxSizing: "border-box" };
-const titleStyle = { color: "#ffffff", fontSize: "14rem", fontWeight: "bold" };
-const descriptionStyle = {
-  width: "258rem",
-  marginTop: "3rem",
-  color: "rgba(255, 255, 255, 0.68)",
-  fontSize: "11.5rem",
-  lineHeight: "15rem",
+const titleStyle = {
+  width: "270rem",
+  flexGrow: 0,
+  flexShrink: 0,
+  color: "#ffffff",
+  fontSize: "14rem",
+  fontWeight: "bold",
 };
 const statusStyle = {
   width: "334rem",
@@ -66,7 +67,6 @@ const rowLabelStyle = {
   color: "#ffffff",
   fontSize: "12rem",
 };
-const rowHintStyle = { color: "rgba(255, 255, 255, 0.5)", fontSize: "11rem" };
 const columnHeaderStyle = {
   width: "72rem",
   marginLeft: "4rem",
@@ -133,35 +133,26 @@ function Toggle({ label, active, onClick }) {
   );
 }
 
-function TrackRow({ index, track }) {
-  const changes = (track.lc || 0) + (track.rc || 0);
+// A cell for one end: its switch, or an empty space where the track stops there.
+function EndCell({ open, active, onClick }) {
+  return h("div", { style: cellStyle }, open ? h(Toggle, { label: active ? "ON" : "OFF", active, onClick }) : null);
+}
+
+function TrackRow({ index, track, columns }) {
   return h(
     "div",
     { style: rowStyle },
-    h(
-      "div",
-      { style: rowLabelStyle },
-      "Track " + (index + 1),
-      changes > 0 ? h("span", { style: rowHintStyle }, "  " + changes + " lane change" + (changes === 1 ? "" : "s")) : null
-    ),
-    h(
-      "div",
-      { style: cellStyle },
-      h(Toggle, { label: track.l ? "ON" : "OFF", active: track.l, onClick: () => setSide(index, 0, !track.l) })
-    ),
-    h(
-      "div",
-      { style: cellStyle },
-      h(Toggle, { label: track.r ? "ON" : "OFF", active: track.r, onClick: () => setSide(index, 1, !track.r) })
-    )
+    h("div", { style: rowLabelStyle }, "Track " + (index + 1)),
+    columns[0] ? h(EndCell, { open: track.lo, active: track.l, onClick: () => setSide(index, 0, !track.l) }) : null,
+    columns[1] ? h(EndCell, { open: track.ro, active: track.r, onClick: () => setSide(index, 1, !track.r) }) : null
   );
 }
 
 function StationJunctionControl() {
   const stationSelected = api.useValue(stationSelected$);
   const tracksJson = api.useValue(tracks$);
-  const removedCount = api.useValue(removedCount$);
   const status = api.useValue(status$);
+  const endsFaceStreet = api.useValue(endsFaceStreet$);
 
   if (!stationSelected) {
     return null;
@@ -169,14 +160,17 @@ function StationJunctionControl() {
 
   const tracks = parseTracks(tracksJson);
   let on = 0;
+  let total = 0;
   tracks.forEach((track) => {
-    if (track.l) on++;
-    if (track.r) on++;
+    if (track.lo) total++;
+    if (track.ro) total++;
+    if (track.lo && track.l) on++;
+    if (track.ro && track.r) on++;
   });
-  const total = tracks.length * 2;
+  // A column where every track stops, as at a terminal's street end, is left out.
+  const columns = [tracks.some((track) => track.lo), tracks.some((track) => track.ro)];
   const allOn = total > 0 && on === total;
   const masterLabel = on === 0 ? "OFF" : allOn ? "ON" : "MIXED";
-  const progress = removedCount > 0 ? " (" + removedCount + " removed)" : "";
 
   return h(
     "div",
@@ -184,28 +178,19 @@ function StationJunctionControl() {
     h(
       "div",
       { style: headerStyle },
-      h(
-        "div",
-        { style: copyStyle },
-        h("div", { style: titleStyle }, "Straight-only platforms" + progress),
-        h(
-          "div",
-          { style: descriptionStyle },
-          "Removes the lane changes at each end of a platform track, so trains reach it only straight on. The top switch sets every end at once."
-        )
-      ),
-      h(Toggle, { label: masterLabel, active: on > 0, onClick: () => send("setAllTracks", !allOn) })
+      h("div", { style: titleStyle }, "Straight-only platforms"),
+      total > 0 ? h(Toggle, { label: masterLabel, active: on > 0, onClick: () => send("setAllTracks", !allOn) }) : null
     ),
-    tracks.length > 0
+    total > 0
       ? h(
           "div",
           { style: rowStyle },
           h("div", { style: rowLabelStyle }, ""),
-          h("div", { style: columnHeaderStyle }, "Left end"),
-          h("div", { style: columnHeaderStyle }, "Right end")
+          columns[0] ? h("div", { style: columnHeaderStyle }, endsFaceStreet ? "Far end" : "Left end") : null,
+          columns[1] ? h("div", { style: columnHeaderStyle }, endsFaceStreet ? "Street end" : "Right end") : null
         )
       : null,
-    tracks.map((track, index) => h(TrackRow, { key: index, index, track })),
+    total > 0 ? tracks.map((track, index) => h(TrackRow, { key: index, index, track, columns })) : null,
     status ? h("div", { style: statusStyle }, status) : null
   );
 }
@@ -225,7 +210,11 @@ function wrapVisualCustomisation(components) {
     );
   }
 
-  return { ...components, [VISUAL_CUSTOMISATION]: StraightTrainStopVisualCustomisation };
+  return {
+    ...components,
+    [VISUAL_CUSTOMISATION]: StraightTrainStopVisualCustomisation,
+    [OWN_SECTION]: StationJunctionControl,
+  };
 }
 
 export default function register(moduleRegistry) {

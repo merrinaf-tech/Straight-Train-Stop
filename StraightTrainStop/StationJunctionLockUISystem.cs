@@ -19,6 +19,7 @@ public sealed partial class StationJunctionLockUISystem : UISystemBase
     private ValueBinding<string> _rows = null!;
     private ValueBinding<int> _removedCount = null!;
     private ValueBinding<string> _status = null!;
+    private ValueBinding<bool> _endsFaceStreet = null!;
     private Entity _lastSelection;
     private int _lastRevision = -1;
 
@@ -28,10 +29,12 @@ public sealed partial class StationJunctionLockUISystem : UISystemBase
         base.OnCreate();
         _selectedInfo = World.GetOrCreateSystemManaged<SelectedInfoUISystem>();
         _junctionLocks = World.GetOrCreateSystemManaged<StationJunctionLockSystem>();
+        World.GetOrCreateSystemManaged<StationTracksSection>();
         AddBinding(_stationSelected = new ValueBinding<bool>(Group, "stationSelected", false));
         AddBinding(_rows = new ValueBinding<string>(Group, "tracks", "[]"));
         AddBinding(_removedCount = new ValueBinding<int>(Group, "removedCount", 0));
         AddBinding(_status = new ValueBinding<string>(Group, "junctionStatus", string.Empty));
+        AddBinding(_endsFaceStreet = new ValueBinding<bool>(Group, "endsFaceStreet", false));
 
         // One int keeps the binding to a single argument: row * 4 + side * 2 + (on ? 1 : 0).
         AddBinding(new TriggerBinding<int>(Group, "setTrackSide", code =>
@@ -58,6 +61,7 @@ public sealed partial class StationJunctionLockUISystem : UISystemBase
         _stationSelected.Update(state.IsStation);
         _rows.Update(ToJson(state));
         _removedCount.Update(state.RemovedCount);
+        _endsFaceStreet.Update(state.EndsFaceStreet);
 
         string message = string.Empty;
         if (state.IsStation)
@@ -70,7 +74,10 @@ public sealed partial class StationJunctionLockUISystem : UISystemBase
         _status.Update(message);
     }
 
-    /// <summary>[{"l":true,"r":false,"lc":2,"rc":0}, ...], one entry per platform track.</summary>
+    /// <summary>
+    /// [{"l":true,"r":false,"lo":true,"ro":false}, ...], one entry per platform track: each end's
+    /// switch, and whether the end is open (false where the track stops, which gets no switch).
+    /// </summary>
     private static string ToJson(StationLockStatus state)
     {
         var json = new StringBuilder("[");
@@ -81,8 +88,8 @@ public sealed partial class StationJunctionLockUISystem : UISystemBase
                 json.Append(',');
             json.Append("{\"l\":").Append(row.Left ? "true" : "false")
                 .Append(",\"r\":").Append(row.Right ? "true" : "false")
-                .Append(",\"lc\":").Append(row.LeftChanges)
-                .Append(",\"rc\":").Append(row.RightChanges)
+                .Append(",\"lo\":").Append(row.LeftOpen ? "true" : "false")
+                .Append(",\"ro\":").Append(row.RightOpen ? "true" : "false")
                 .Append('}');
         }
         return json.Append(']').ToString();

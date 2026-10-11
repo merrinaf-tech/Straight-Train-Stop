@@ -57,32 +57,34 @@ internal readonly struct RowStatus
 {
     public readonly bool Left;
     public readonly bool Right;
-    public readonly int LeftChanges;
-    public readonly int RightChanges;
+    public readonly bool LeftOpen;
+    public readonly bool RightOpen;
 
-    public RowStatus(bool left, bool right, int leftChanges, int rightChanges)
+    public RowStatus(bool left, bool right, bool leftOpen, bool rightOpen)
     {
         Left = left;
         Right = right;
-        LeftChanges = leftChanges;
-        RightChanges = rightChanges;
+        LeftOpen = leftOpen;
+        RightOpen = rightOpen;
     }
 }
 
 internal readonly struct StationLockStatus
 {
     public static readonly StationLockStatus NotAStation =
-        new StationLockStatus(false, new List<RowStatus>(), 0);
+        new StationLockStatus(false, new List<RowStatus>(), 0, false);
 
     public readonly bool IsStation;
     public readonly List<RowStatus> Rows;
     public readonly int RemovedCount;
+    public readonly bool EndsFaceStreet;
 
-    public StationLockStatus(bool isStation, List<RowStatus> rows, int removed)
+    public StationLockStatus(bool isStation, List<RowStatus> rows, int removed, bool endsFaceStreet)
     {
         IsStation = isStation;
         Rows = rows;
         RemovedCount = removed;
+        EndsFaceStreet = endsFaceStreet;
     }
 }
 
@@ -120,11 +122,14 @@ public sealed partial class StationJunctionLockSystem : GameSystemBase
     private EntityQuery _lockedStationQuery;
     private EntityQuery _regeneratedTrackLaneQuery;
     private EntityQuery _trainQuery;
+    private EntityQuery _passengerStopQuery;
     private StationRegenerationSystem _regeneration = null!;
     private readonly Dictionary<Entity, int> _removedCounts = new Dictionary<Entity, int>();
     private readonly HashSet<Entity> _deferredStations = new HashSet<Entity>();
     private readonly List<SideRequest> _requests = new List<SideRequest>();
     private int _ticks;
+    private bool _checkAllAfterLoad;
+    private Entity _lastDescribed;
 
     private readonly struct SideRequest
     {
@@ -179,6 +184,19 @@ public sealed partial class StationJunctionLockSystem : GameSystemBase
                 ComponentType.ReadOnly<Temp>()
             }
         });
+        _passengerStopQuery = GetEntityQuery(new EntityQueryDesc
+        {
+            All = new[]
+            {
+                ComponentType.ReadOnly<Game.Routes.TrainStop>(),
+                ComponentType.ReadOnly<Owner>()
+            },
+            None = new[]
+            {
+                ComponentType.ReadOnly<Deleted>(),
+                ComponentType.ReadOnly<Temp>()
+            }
+        });
         _trainQuery = GetEntityQuery(new EntityQueryDesc
         {
             All = new[]
@@ -202,11 +220,10 @@ public sealed partial class StationJunctionLockSystem : GameSystemBase
         _removedCounts.Clear();
         _deferredStations.Clear();
 
-        // Deleted lanes are not saved, but a station can have been regenerated without the mod,
-        // e.g. when the save was made by another version. Regenerate once to be sure.
-        using NativeArray<Entity> stations = _lockedStationQuery.ToEntityArray(Allocator.Temp);
-        foreach (Entity station in stations)
-            _regeneration.RequestRegenerate(station);
+        // Deleted lanes are not saved, so a loaded city normally has none to remove. Check every
+        // locked station once anyway, e.g. for a lane that still had a train on it at save time,
+        // but only by deleting: regenerating right after a load touched more than the lanes.
+        _checkAllAfterLoad = true;
     }
 
     [Preserve]
@@ -225,8 +242,12 @@ public sealed partial class StationJunctionLockSystem : GameSystemBase
             if (_lockedStationQuery.IsEmptyIgnoreFilter)
                 return;
 
-            if (!_regeneratedTrackLaneQuery.IsEmptyIgnoreFilter)
-                RemoveRegeneratedBranches();
+            if (_checkAllAfterLoad || !_regeneratedTrackLaneQuery.IsEmptyIgnoreFilter)
+            {
+                bool all = _checkAllAfterLoad;
+                _checkAllAfterLoad = false;
+                RemoveRegeneratedBranches(all);
+            }
 
             // A branch with a train on it is left until the train has gone, then the station is
             // regenerated again.
@@ -262,7 +283,15 @@ public sealed partial class StationJunctionLockSystem : GameSystemBase
             return StationLockStatus.NotAStation;
 
         EntityManager.CompleteAllTrackedJobs();
-        StationLayout layout = StationLayout.Build(EntityManager, station);
+        using NativeArray<Entity> stops = _passengerStopQuery.ToEntityArray(Allocator.Temp);
+        StationLayout layout = StationLayout.Build(EntityManager, station, stops);
+        if (!layout.HasRailway)
+            return StationLockStatus.NotAStation;
+        if (station != _lastDescribed)
+        {
+            _lastDescribed = station;
+            Mod.Log.Info($"Station #{station.Index}: {layout.Describe()}");
+        }
         GetMasks(station, out ulong left, out ulong right);
         _removedCounts.TryGetValue(station, out int removed);
 
@@ -274,18 +303,101 @@ public sealed partial class StationJunctionLockSystem : GameSystemBase
             rows.Add(new RowStatus(
                 (left & bit) != 0,
                 (right & bit) != 0,
-                CountLaneChanges(row.Left),
-                CountLaneChanges(row.Right)));
+                !row.Left.DeadEnd,
+                !row.Right.DeadEnd));
         }
-        return new StationLockStatus(true, rows, removed);
+        return new StationLockStatus(true, rows, removed, layout.EndsFaceStreet);
     }
 
-    private int CountLaneChanges(TrackSide side)
+    /// <summary>
+    /// The station's lane changes, each with the track ends it belongs to as row * 2 + side.
+    ///
+    /// The approach walks of neighbouring tracks overlap, so a crossover out in the throat used to
+    /// be in every track's end and each switch removed the same lanes. A lane change now belongs
+    /// only to the ends that reach one of its edges in the fewest steps from their platform, which
+    /// is the track it actually leads into. A lane change counts only at an end holding its node,
+    /// so the two ends of one track never share one.
+    /// </summary>
+    private Dictionary<Entity, List<int>> AssignLaneChanges(
+        StationLayout layout,
+        Dictionary<Entity, List<Entity>>? createdByNode = null)
     {
-        var branches = new HashSet<Entity>();
-        foreach (Entity node in side.Nodes)
-            FindDivergingBranches(node, side.Edges, branches);
-        return branches.Count;
+        var edges = new HashSet<Entity>();
+        var endsByNode = new Dictionary<Entity, List<int>>();
+        for (int i = 0; i < layout.Rows.Count && i < 64; i++)
+        {
+            for (int s = 0; s < 2; s++)
+            {
+                TrackSide side = layout.Rows[i].Side(s);
+                if (side.DeadEnd)
+                    continue;
+                edges.UnionWith(side.Edges.Keys);
+                foreach (Entity node in side.Nodes)
+                {
+                    if (!endsByNode.TryGetValue(node, out List<int> ends))
+                        endsByNode[node] = ends = new List<int>();
+                    ends.Add(i * 2 + s);
+                }
+            }
+        }
+
+        var owners = new Dictionary<Entity, List<int>>();
+        foreach (KeyValuePair<Entity, List<int>> pair in endsByNode)
+        {
+            List<Entity>? created = null;
+            createdByNode?.TryGetValue(pair.Key, out created);
+            var lanes = new HashSet<Entity>();
+            FindDivergingBranches(pair.Key, edges, layout.Sidings, lanes, created);
+            foreach (Entity lane in lanes)
+            {
+                if (owners.ContainsKey(lane))
+                    continue;
+                int nearest = int.MaxValue;
+                var ends = new List<int>();
+                foreach (int end in pair.Value)
+                {
+                    int steps = StepsFromPlatform(lane, layout.Rows[end / 2].Side(end % 2));
+                    if (steps > nearest || steps == int.MaxValue)
+                        continue;
+                    if (steps < nearest)
+                    {
+                        nearest = steps;
+                        ends.Clear();
+                    }
+                    ends.Add(end);
+                }
+                if (ends.Count > 0)
+                    owners[lane] = ends;
+            }
+        }
+        return owners;
+    }
+
+    /// <summary>The fewest edges between the side's platform and an edge the lane runs into or out of.</summary>
+    private int StepsFromPlatform(Entity lane, TrackSide side)
+    {
+        Lane laneData = EntityManager.GetComponentData<Lane>(lane);
+        int steps = int.MaxValue;
+        foreach (KeyValuePair<Entity, int> edge in side.Edges)
+        {
+            if (edge.Value >= steps || !EntityManager.HasComponent<Game.Net.Edge>(edge.Key))
+                continue;
+            var edgeNode = new PathNode(edge.Key, (ushort)0);
+            if (laneData.m_StartNode.OwnerEquals(edgeNode) || laneData.m_EndNode.OwnerEquals(edgeNode))
+                steps = edge.Value;
+        }
+        return steps;
+    }
+
+    private static bool IsEnabled(List<int> ends, ulong left, ulong right)
+    {
+        foreach (int end in ends)
+        {
+            int row = end / 2;
+            if (row < 64 && ((end % 2 == 0 ? left : right) & (1UL << row)) != 0)
+                return true;
+        }
+        return false;
     }
 
     private void GetMasks(Entity station, out ulong left, out ulong right)
@@ -307,14 +419,18 @@ public sealed partial class StationJunctionLockSystem : GameSystemBase
 
         EntityManager.CompleteAllTrackedJobs();
         LastStation = station;
-        StationLayout layout = StationLayout.Build(EntityManager, station);
-        ulong all = layout.AllRowsMask;
+        using NativeArray<Entity> stops = _passengerStopQuery.ToEntityArray(Allocator.Temp);
+        StationLayout layout = StationLayout.Build(EntityManager, station, stops);
+        if (!layout.HasRailway)
+            return;
+        ulong openLeft = layout.OpenMask(0);
+        ulong openRight = layout.OpenMask(1);
         GetMasks(station, out ulong left, out ulong right);
 
         if (request.Row < 0)
         {
-            left = request.Enabled ? all : 0;
-            right = request.Enabled ? all : 0;
+            left = request.Enabled ? openLeft : 0;
+            right = request.Enabled ? openRight : 0;
         }
         else if (request.Row < layout.Rows.Count && request.Row < 64)
         {
@@ -324,8 +440,8 @@ public sealed partial class StationJunctionLockSystem : GameSystemBase
             else
                 right = request.Enabled ? right | bit : right & ~bit;
         }
-        left &= all;
-        right &= all;
+        left &= openLeft;
+        right &= openRight;
 
         if (left == 0 && right == 0)
         {
@@ -354,15 +470,14 @@ public sealed partial class StationJunctionLockSystem : GameSystemBase
         LastMessage = left == 0 && right == 0 ? "Lane changes will be rebuilt." : "Updating lane changes.";
         Revision++;
 
-        Dictionary<Entity, HashSet<Entity>> scope = layout.EnabledScope(left, right);
-        var branches = new HashSet<Entity>();
-        foreach (KeyValuePair<Entity, HashSet<Entity>> pair in scope)
-            FindDivergingBranches(pair.Key, pair.Value, branches);
+        int toRemove = 0;
+        foreach (List<int> ends in AssignLaneChanges(layout).Values)
+            if (IsEnabled(ends, left, right))
+                toRemove++;
         string what = request.Row < 0
             ? (request.Enabled ? "all ends on" : "all ends off")
             : $"track {request.Row + 1} {(request.Side == 0 ? "left" : "right")} {(request.Enabled ? "on" : "off")}";
-        Mod.Log.Info($"Station #{station.Index}: {what}; {layout.Rows.Count} track(s), masks L={left:X} R={right:X}, {branches.Count} lane change(s) to remove.");
-
+        Mod.Log.Info($"Station #{station.Index}: {what}; {layout.Rows.Count} track(s), masks L={left:X} R={right:X}, {toRemove} lane change(s) to remove.");
     }
 
     /// <summary>
@@ -370,37 +485,43 @@ public sealed partial class StationJunctionLockSystem : GameSystemBase
     /// regenerated lanes for. Only lanes carrying Created or Updated this frame lead to a station
     /// being looked at, so an unchanged network costs one empty query check.
     /// </summary>
-    private void RemoveRegeneratedBranches()
+    private void RemoveRegeneratedBranches(bool allStations)
     {
         EntityManager.CompleteAllTrackedJobs();
         using NativeArray<Entity> regenerated = _regeneratedTrackLaneQuery.ToEntityArray(Allocator.Temp);
         using NativeArray<Entity> stations = _lockedStationQuery.ToEntityArray(Allocator.Temp);
-
-        var layouts = new Dictionary<Entity, StationLayout>();
-        var scopes = new Dictionary<Entity, Dictionary<Entity, HashSet<Entity>>>();
-        foreach (Entity station in stations)
-        {
-            GetMasks(station, out ulong left, out ulong right);
-            StationLayout layout = StationLayout.Build(EntityManager, station);
-            layouts[station] = layout;
-            scopes[station] = layout.EnabledScope(left, right);
-        }
+        using NativeArray<Entity> stops = _passengerStopQuery.ToEntityArray(Allocator.Temp);
 
         // Any regenerated lane of a station, edge lane or node lane, sends every enabled node of
         // that station through the check. Looking only at the nodes whose lanes were tagged left
         // lane changes in place at an end just switched on, apparently because LaneSystem does
-        // not tag every lane of a node it regenerates.
+        // not tag every lane of a node it regenerates. Which stations a lane belongs to is read
+        // from their nets alone; the full layout is built only for the stations touched, since any
+        // track edit anywhere in the city lands here.
         var touched = new HashSet<Entity>();
-        var seenOwners = new HashSet<Entity>();
-        foreach (Entity lane in regenerated)
+        if (allStations)
         {
-            Entity owner = EntityManager.GetComponentData<Owner>(lane).m_Owner;
-            if (!seenOwners.Add(owner))
-                continue;
-            foreach (Entity station in stations)
-                if (layouts[station].Nets.Contains(owner))
-                    touched.Add(station);
+            touched.UnionWith(stations);
         }
+        else
+        {
+            var owners = new HashSet<Entity>();
+            foreach (Entity lane in regenerated)
+                owners.Add(EntityManager.GetComponentData<Owner>(lane).m_Owner);
+            foreach (Entity station in stations)
+            {
+                var nets = new HashSet<Entity>();
+                StationNets.Collect(EntityManager, station, nets);
+                if (nets.Overlaps(owners))
+                    touched.Add(station);
+            }
+        }
+        if (touched.Count == 0)
+            return;
+
+        var layouts = new Dictionary<Entity, StationLayout>();
+        foreach (Entity station in touched)
+            layouts[station] = StationLayout.Build(EntityManager, station, stops);
 
         var lanesByNode = new Dictionary<Entity, List<Entity>>();
         foreach (Entity lane in regenerated)
@@ -411,20 +532,13 @@ public sealed partial class StationJunctionLockSystem : GameSystemBase
             list.Add(lane);
         }
 
-        var nodesByStation = new Dictionary<Entity, HashSet<Entity>>();
         foreach (Entity station in touched)
-            if (scopes[station].Count > 0)
-                nodesByStation[station] = new HashSet<Entity>(scopes[station].Keys);
-
-        foreach (KeyValuePair<Entity, HashSet<Entity>> pair in nodesByStation)
         {
-            Entity station = pair.Key;
-            var branches = new HashSet<Entity>();
-            foreach (Entity node in pair.Value)
-            {
-                lanesByNode.TryGetValue(node, out List<Entity>? created);
-                FindDivergingBranches(node, scopes[station][node], branches, created);
-            }
+            GetMasks(station, out ulong left, out ulong right);
+            var branches = new List<Entity>();
+            foreach (KeyValuePair<Entity, List<int>> pair in AssignLaneChanges(layouts[station], lanesByNode))
+                if (IsEnabled(pair.Value, left, right))
+                    branches.Add(pair.Key);
 
             int removed = 0;
             int busy = 0;
@@ -465,6 +579,7 @@ public sealed partial class StationJunctionLockSystem : GameSystemBase
     private void FindDivergingBranches(
         Entity node,
         HashSet<Entity> allowedEdges,
+        HashSet<Entity> sidings,
         HashSet<Entity> output,
         List<Entity>? createdLanes = null)
     {
@@ -502,7 +617,7 @@ public sealed partial class StationJunctionLockSystem : GameSystemBase
         CollectLessStraight(bySource, turns, lessStraight);
         CollectLessStraight(byTarget, turns, lessStraight);
         foreach (Entity lane in lessStraight)
-            if (TouchesStationEdge(lane, allowedEdges))
+            if (TouchesStationEdge(lane, allowedEdges) && !TouchesStationEdge(lane, sidings))
                 output.Add(lane);
     }
 
