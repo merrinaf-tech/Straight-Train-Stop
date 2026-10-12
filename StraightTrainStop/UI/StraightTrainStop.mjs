@@ -3,7 +3,7 @@
  *
  * Id: StraightTrainStop
  * Author: Fabiozsche
- * Version: 1.0.1
+ * Version: 1.0.2
  * Dependencies:
  */
 
@@ -13,6 +13,10 @@ const VISUAL_CUSTOMISATION = "Game.UI.InGame.VisualCustomizeSection";
 // Our own info section, shown instead on stations that have no Visual Customisation.
 const OWN_SECTION = "StraightTrainStop.StationTracksSection";
 
+const CHECKBOX = "game-ui/common/input/toggle/checkbox/checkbox.tsx";
+const INFO_ROW = "game-ui/game/components/selected-info-panel/shared-components/info-row/info-row.tsx";
+const INFO_SECTION = "game-ui/game/components/selected-info-panel/shared-components/info-section/info-section.tsx";
+
 const React = window.React;
 const api = window["cs2/api"];
 const h = React.createElement;
@@ -20,9 +24,24 @@ const h = React.createElement;
 const stationSelected$ = api.bindValue(GROUP, "stationSelected", false);
 const tracks$ = api.bindValue(GROUP, "tracks", "[]");
 const status$ = api.bindValue(GROUP, "junctionStatus", "");
-const endsFaceStreet$ = api.bindValue(GROUP, "endsFaceStreet", false);
 
-// Same inset and width as the game's palette box above it in Visual Customisation.
+// The game's own panel pieces, the ones the Historical row uses, looked up when the module
+// registers. Where any is missing the panel falls back to the card below, so it never vanishes.
+const vanilla = { Checkbox: null, InfoRow: null, InfoSection: null };
+
+function lookup(moduleRegistry, path, name) {
+  try {
+    return moduleRegistry.get(path, name) || null;
+  } catch (e) {
+    return null;
+  }
+}
+
+const endsStyle = { display: "flex", flexDirection: "row", alignItems: "center" };
+const endCellStyle = { width: "64rem", display: "flex", justifyContent: "center" };
+const endHeadingStyle = { width: "64rem", textAlign: "center", fontSize: "11rem", opacity: 0.6 };
+
+// Fallback card. Same inset and width as the game's palette box above it in Visual Customisation.
 const cardStyle = {
   margin: "10rem 21rem 10rem 21rem",
   padding: "10rem 12rem",
@@ -138,13 +157,71 @@ function EndCell({ open, active, onClick }) {
   return h("div", { style: cellStyle }, open ? h(Toggle, { label: active ? "ON" : "OFF", active, onClick }) : null);
 }
 
-function TrackRow({ index, track, columns }) {
+// The cells for a track's two ends, or two headings: one per column the kind uses.
+function Ends({ columns, cells }) {
+  return h(
+    "div",
+    { style: endsStyle },
+    columns[0] ? cells[0] : null,
+    columns[1] ? cells[1] : null
+  );
+}
+
+function TrackRow({ index, label, track, columns }) {
+  if (vanilla.InfoRow) {
+    const cell = (open, checked, side) =>
+      h("div", { style: endCellStyle }, open ? h(vanilla.Checkbox, { checked: !!checked, onChange: (value) => setSide(index, side, value) }) : null);
+    return h(vanilla.InfoRow, {
+      subRow: true,
+      noShrinkRight: true,
+      left: label,
+      right: h(Ends, { columns, cells: [cell(track.lo, track.l, 0), cell(track.ro, track.r, 1)] }),
+    });
+  }
   return h(
     "div",
     { style: rowStyle },
-    h("div", { style: rowLabelStyle }, "Track " + (index + 1)),
+    h("div", { style: rowLabelStyle }, label),
     columns[0] ? h(EndCell, { open: track.lo, active: track.l, onClick: () => setSide(index, 0, !track.l) }) : null,
     columns[1] ? h(EndCell, { open: track.ro, active: track.r, onClick: () => setSide(index, 1, !track.r) }) : null
+  );
+}
+
+// One kind of track: its column headings, then a row per track. A column where every track of
+// the kind stops, as at a terminal's street end, is left out.
+function TrackGroup({ items, mixed }) {
+  const metro = !!items[0].track.m;
+  const facesStreet = !!items[0].track.fs;
+  const columns = [items.some((item) => item.track.lo), items.some((item) => item.track.ro)];
+  const heading = mixed ? (metro ? "Metro" : "Railway") : "";
+  const headings = [facesStreet ? "Far end" : "Left end", facesStreet ? "Street end" : "Right end"];
+  const headingRow = vanilla.InfoRow
+    ? h(vanilla.InfoRow, {
+        subRow: true,
+        noShrinkRight: true,
+        left: heading,
+        right: h(Ends, { columns, cells: headings.map((text) => h("div", { style: endHeadingStyle }, text)) }),
+      })
+    : h(
+        "div",
+        { style: rowStyle },
+        h("div", { style: rowLabelStyle }, heading),
+        columns[0] ? h("div", { style: columnHeaderStyle }, headings[0]) : null,
+        columns[1] ? h("div", { style: columnHeaderStyle }, headings[1]) : null
+      );
+  return h(
+    React.Fragment,
+    null,
+    headingRow,
+    items.map((item, position) =>
+      h(TrackRow, {
+        key: item.index,
+        index: item.index,
+        label: (metro ? "Metro " : "Track ") + (position + 1),
+        track: item.track,
+        columns,
+      })
+    )
   );
 }
 
@@ -152,7 +229,6 @@ function StationJunctionControl() {
   const stationSelected = api.useValue(stationSelected$);
   const tracksJson = api.useValue(tracks$);
   const status = api.useValue(status$);
-  const endsFaceStreet = api.useValue(endsFaceStreet$);
 
   if (!stationSelected) {
     return null;
@@ -167,11 +243,34 @@ function StationJunctionControl() {
     if (track.lo && track.l) on++;
     if (track.ro && track.r) on++;
   });
-  // A column where every track stops, as at a terminal's street end, is left out.
-  const columns = [tracks.some((track) => track.lo), tracks.some((track) => track.ro)];
   const allOn = total > 0 && on === total;
-  const masterLabel = on === 0 ? "OFF" : allOn ? "ON" : "MIXED";
 
+  // Railway tracks come first, then metro tracks; each kind gets its own column headings.
+  const groups = [false, true]
+    .map((metro) => tracks.map((track, index) => ({ track, index })).filter((item) => !!item.track.m === metro))
+    .filter((items) => items.length > 0);
+  const mixed = groups.length > 1;
+  const rows = total > 0 ? groups.map((items) => h(TrackGroup, { key: items[0].index, items, mixed })) : null;
+
+  if (vanilla.InfoRow && vanilla.Checkbox && vanilla.InfoSection) {
+    // The master box shows the game's mixed state while only some ends are on.
+    const master = total > 0
+      ? h(vanilla.Checkbox, {
+          multistate: true,
+          checked: on === 0 ? false : allOn ? true : undefined,
+          onMultistateChange: () => send("setAllTracks", !allOn),
+        })
+      : null;
+    return h(
+      vanilla.InfoSection,
+      { disableFocus: true },
+      h(vanilla.InfoRow, { left: "Straight-only platforms", right: master }),
+      rows,
+      status ? h(vanilla.InfoRow, { subRow: true, subRowDimmed: true, left: status }) : null
+    );
+  }
+
+  const masterLabel = on === 0 ? "OFF" : allOn ? "ON" : "MIXED";
   return h(
     "div",
     { style: cardStyle },
@@ -181,16 +280,7 @@ function StationJunctionControl() {
       h("div", { style: titleStyle }, "Straight-only platforms"),
       total > 0 ? h(Toggle, { label: masterLabel, active: on > 0, onClick: () => send("setAllTracks", !allOn) }) : null
     ),
-    total > 0
-      ? h(
-          "div",
-          { style: rowStyle },
-          h("div", { style: rowLabelStyle }, ""),
-          columns[0] ? h("div", { style: columnHeaderStyle }, endsFaceStreet ? "Far end" : "Left end") : null,
-          columns[1] ? h("div", { style: columnHeaderStyle }, endsFaceStreet ? "Street end" : "Right end") : null
-        )
-      : null,
-    total > 0 ? tracks.map((track, index) => h(TrackRow, { key: index, index, track, columns })) : null,
+    rows,
     status ? h("div", { style: statusStyle }, status) : null
   );
 }
@@ -218,5 +308,11 @@ function wrapVisualCustomisation(components) {
 }
 
 export default function register(moduleRegistry) {
+  vanilla.Checkbox = lookup(moduleRegistry, CHECKBOX, "Checkbox");
+  vanilla.InfoRow = lookup(moduleRegistry, INFO_ROW, "InfoRow");
+  vanilla.InfoSection = lookup(moduleRegistry, INFO_SECTION, "InfoSection");
+  if (!(vanilla.Checkbox && vanilla.InfoRow && vanilla.InfoSection)) {
+    vanilla.Checkbox = vanilla.InfoRow = vanilla.InfoSection = null;
+  }
   moduleRegistry.extend(SECTIONS, "selectedInfoSectionComponents", wrapVisualCustomisation);
 }

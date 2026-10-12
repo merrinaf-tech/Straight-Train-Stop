@@ -24,11 +24,14 @@ internal static class StationNets
             CollectSubNets(entityManager, upgrade, output);
     }
 
+    /// <summary>The track types the mod works on: railway and metro, not tram.</summary>
+    public const TrackTypes RailTypes = TrackTypes.Train | TrackTypes.Subway;
+
     /// <summary>
-    /// True for a railway lane. Tram and subway tracks share TrackLane, and a station can sit on
-    /// top of a metro line, so the track type comes from the lane prefab.
+    /// True for a track lane of one of the given types. Train, tram and subway tracks all use
+    /// TrackLane, so the type comes from the lane prefab.
     /// </summary>
-    public static bool IsTrainLane(EntityManager entityManager, Entity lane)
+    public static bool IsRailLane(EntityManager entityManager, Entity lane, TrackTypes types = RailTypes)
     {
         if (!entityManager.Exists(lane)
             || !entityManager.HasComponent<TrackLane>(lane)
@@ -36,7 +39,7 @@ internal static class StationNets
             return false;
         Entity prefab = entityManager.GetComponentData<Game.Prefabs.PrefabRef>(lane).m_Prefab;
         return entityManager.HasComponent<Game.Prefabs.TrackLaneData>(prefab)
-            && (entityManager.GetComponentData<Game.Prefabs.TrackLaneData>(prefab).m_TrackTypes & TrackTypes.Train) != 0;
+            && (entityManager.GetComponentData<Game.Prefabs.TrackLaneData>(prefab).m_TrackTypes & types) != 0;
     }
 
     public static void AddNetOwner(EntityManager entityManager, Entity owner, HashSet<Entity> output)

@@ -39,15 +39,14 @@ Removed lane changes are not part of the save. If you uninstall the mod, a stati
 
   <ExternalLink Type="github" Url="https://github.com/merrinaf-tech/Straight-Train-Stop" />
   <ExternalLink Type="kofi" Url="https://ko-fi.com/fabiozsche" />
-  <ModVersion Value="1.0.1" />
+  <ModVersion Value="1.0.2" />
   <GameVersion Value="1.6.*" />
   <AccessLevel Value="Public" />
   <!-- The live version's changes. Update refuses an empty ChangeLog, so after a NewVersion these
        lines stay until the next one replaces them with that version's changes only. -->
   <ChangeLog>
-- Only passenger platforms get a row; depot and yard tracks are left alone.
-- Stations keep their road connection after reloading.
-- Stations without Visual Customisation show the switches in the info panel.
-- Terminals show a far and a street end, with no switch at the buffer stops.
+- Metro stations get the switches too.
+- Platforms facing another way, as in round stations, get their own rows.
+- The panel uses the game's own checkboxes.
   </ChangeLog>
 </Publish>

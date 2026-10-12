@@ -34,11 +34,19 @@ internal sealed class TrackRow
 
     /// <summary>Train stops of the station placed along this track, found by position.</summary>
     public int StopCount;
+
+    /// <summary>True for a metro track, false for a railway one.</summary>
+    public bool Metro;
+
+    /// <summary>True when this track's platforms point at the street: its ends are far and street.</summary>
+    public bool FacesStreet;
 }
 
 /// <summary>
 /// The station split into platform tracks, each with two ends, in the frame of the station
-/// building as seen from its street side. Only railway tracks count, not a metro beneath.
+/// building as seen from its street side. Railway tracks come first, then metro tracks, each kind
+/// laid out on its own: a metro beneath a station can run another way, and putting the metro rows
+/// after the railway ones keeps the saved railway masks on their tracks.
 ///
 /// Platforms parallel to the street: rows run from the track farthest from the street to the
 /// nearest, and the ends are the viewer's left and right. Platforms pointing at the street, as in
@@ -62,14 +70,12 @@ internal sealed class StationLayout
     /// </summary>
     public readonly HashSet<Entity> Sidings = new HashSet<Entity>();
 
-    /// <summary>True when the platforms point at the street, so the ends are far and street.</summary>
-    public bool EndsFaceStreet;
-
-    /// <summary>False for a station without railway track, such as a metro station.</summary>
+    /// <summary>False for a station without railway or metro track, such as a bus station.</summary>
     public bool HasRailway;
 
     /// <summary>How many of the station's train stops are attached to each edge.</summary>
     private readonly Dictionary<Entity, int> _stopCounts = new Dictionary<Entity, int>();
+    private int _directionGroups;
 
     /// <summary>
     /// Builds the layout. A platform is an edge of the station that one of its passenger train
@@ -87,41 +93,109 @@ internal sealed class StationLayout
         if (!layout.HasRailway)
             return layout;
 
-        var platformEdges = new List<Entity>();
         foreach (KeyValuePair<Entity, int> pair in StopEdges(entityManager, station, passengerStops))
             layout._stopCounts[pair.Key] = pair.Value;
-        foreach (Entity edge in layout._stopCounts.Keys)
-            if (layout.Nets.Contains(edge) && entityManager.HasComponent<Curve>(edge))
-                platformEdges.Add(edge);
-        if (platformEdges.Exists(edge => IsPlatformEdge(entityManager, edge)))
-            platformEdges.RemoveAll(edge => !IsPlatformEdge(entityManager, edge));
-        if (platformEdges.Count == 0)
-            foreach (Entity net in layout.Nets)
-                if (IsPlatformEdge(entityManager, net))
-                    platformEdges.Add(net);
 
-        if (platformEdges.Count == 0)
+        float3 origin = entityManager.HasComponent<Game.Objects.Transform>(station)
+            ? entityManager.GetComponentData<Game.Objects.Transform>(station).m_Position
+            : float3.zero;
+
+        // Rows per kind first, then the sidings over every platform, then each row's two ends,
+        // which need the sidings to tell a buffer stop from a way out.
+        var kinds = new List<(List<TrackRow> Rows, float3 Axis)>();
+        var allPlatforms = new HashSet<Entity>();
+        foreach (bool metro in new[] { false, true })
+        {
+            // Platforms pointing another way than the longest one, as on the outer ring of a round
+            // station, form a group of their own, laid out on its own axis and listed after it.
+            TrackTypes type = metro ? TrackTypes.Subway : TrackTypes.Train;
+            List<Entity> remaining = layout.PlatformEdges(entityManager, type);
+            while (remaining.Count > 0)
+            {
+                List<TrackRow> rows = layout.BuildRows(
+                    entityManager, station, passengerStops, remaining, origin, metro, out float3 axis, out List<Entity> otherWay);
+                if (rows.Count > 0)
+                {
+                    kinds.Add((rows, axis));
+                    layout._directionGroups++;
+                    foreach (TrackRow row in rows)
+                        allPlatforms.UnionWith(row.Edges);
+                }
+                if (otherWay.Count >= remaining.Count)
+                    break;
+                remaining = otherWay;
+            }
+        }
+
+        if (kinds.Count == 0)
         {
             layout.AddWholeStationRow(entityManager);
             return layout;
         }
 
-        float3 axis = FindAxis(entityManager, station, platformEdges, out layout.EndsFaceStreet);
+        layout.FindSidings(entityManager, allPlatforms);
+        foreach ((List<TrackRow> rows, float3 axis) in kinds)
+        {
+            foreach (TrackRow row in rows)
+                layout.FillSides(entityManager, row, axis, origin, allPlatforms);
+            layout.Rows.AddRange(rows);
+        }
+        return layout;
+    }
+
+    /// <summary>
+    /// The station's platform edges of one track type: edges a stop is attached to, kept to
+    /// those with the Station flag where some have it (a stop's lanes can reach past the platform
+    /// onto the approach track), or failing any stop, every edge with the Station flag.
+    /// </summary>
+    private List<Entity> PlatformEdges(EntityManager entityManager, TrackTypes type)
+    {
+        var platformEdges = new List<Entity>();
+        foreach (Entity edge in _stopCounts.Keys)
+            if (Nets.Contains(edge) && entityManager.HasComponent<Curve>(edge) && HasRailTrack(entityManager, edge, type))
+                platformEdges.Add(edge);
+        if (platformEdges.Exists(edge => IsPlatformEdge(entityManager, edge, type)))
+            platformEdges.RemoveAll(edge => !IsPlatformEdge(entityManager, edge, type));
+        if (platformEdges.Count == 0)
+            foreach (Entity net in Nets)
+                if (IsPlatformEdge(entityManager, net, type))
+                    platformEdges.Add(net);
+        return platformEdges;
+    }
+
+    /// <summary>
+    /// Groups one kind's platform edges into rows across the platforms and orders them: parallel
+    /// to the street, track 1 is the farthest from it; pointing at the street, track 1 is the
+    /// viewer's leftmost. The viewer faces the building, so their right is its -right.
+    /// </summary>
+    private List<TrackRow> BuildRows(
+        EntityManager entityManager,
+        Entity station,
+        NativeArray<Entity> passengerStops,
+        List<Entity> platformEdges,
+        float3 origin,
+        bool metro,
+        out float3 axis,
+        out List<Entity> otherWay)
+    {
+        axis = FindAxis(entityManager, station, platformEdges, out bool facesStreet);
         float3 side = new float3(-axis.z, 0f, axis.x);
-        float3 origin = entityManager.HasComponent<Game.Objects.Transform>(station)
-            ? entityManager.GetComponentData<Game.Objects.Transform>(station).m_Position
-            : float3.zero;
+        var rows = new List<TrackRow>();
+        otherWay = new List<Entity>();
 
         foreach (Entity edge in platformEdges)
         {
             Bezier4x3 curve = entityManager.GetComponentData<Curve>(edge).m_Bezier;
             float3 direction = Horizontal(curve.d - curve.a);
             if (math.abs(math.dot(math.normalizesafe(direction), axis)) < ParallelDot)
+            {
+                otherWay.Add(edge);
                 continue;
+            }
             float lateral = math.dot(Horizontal(MathUtils.Position(curve, 0.5f) - origin), side);
 
             TrackRow? row = null;
-            foreach (TrackRow candidate in layout.Rows)
+            foreach (TrackRow candidate in rows)
             {
                 if (math.abs(candidate.Lateral - lateral) > RowMergeDistance)
                     continue;
@@ -130,40 +204,28 @@ internal sealed class StationLayout
             }
             if (row == null)
             {
-                row = new TrackRow { Lateral = lateral };
-                layout.Rows.Add(row);
+                row = new TrackRow { Lateral = lateral, Metro = metro, FacesStreet = facesStreet };
+                rows.Add(row);
             }
             row.Edges.Add(edge);
         }
 
         // Building stops carry no RouteLane, so when no stop named its edge, match the stops to
         // the tracks by where they stand. A track no stop stands on is a depot or yard track.
-        if (layout._stopCounts.Count == 0)
-            layout.KeepRowsWithStops(entityManager, station, passengerStops, axis, side, origin, platformEdges);
+        if (_stopCounts.Count == 0)
+            KeepRowsWithStops(entityManager, station, passengerStops, axis, side, origin, platformEdges, rows);
 
-        if (layout.Rows.Count == 0)
-        {
-            layout.AddWholeStationRow(entityManager);
-            return layout;
-        }
-
-        // Parallel to the street, track 1 is the farthest from it; pointing at the street, track 1
-        // is the viewer's leftmost. The viewer faces the building, so their right is its -right.
         float order = 1f;
         if (entityManager.HasComponent<Game.Objects.Transform>(station))
         {
             quaternion rotation = entityManager.GetComponentData<Game.Objects.Transform>(station).m_Rotation;
-            float3 reference = layout.EndsFaceStreet
+            float3 reference = facesStreet
                 ? -math.mul(rotation, new float3(1f, 0f, 0f))
                 : math.mul(rotation, new float3(0f, 0f, 1f));
             order = math.dot(side, reference) >= 0f ? 1f : -1f;
         }
-        layout.Rows.Sort((a, b) => (a.Lateral * order).CompareTo(b.Lateral * order));
-        var platformSet = new HashSet<Entity>(platformEdges);
-        layout.FindSidings(entityManager, platformSet);
-        foreach (TrackRow row in layout.Rows)
-            layout.FillSides(entityManager, row, axis, origin, platformSet);
-        return layout;
+        rows.Sort((a, b) => (a.Lateral * order).CompareTo(b.Lateral * order));
+        return rows;
     }
 
     /// <summary>The rows whose given side (0 left, 1 right) leads somewhere and can be switched.</summary>
@@ -181,8 +243,8 @@ internal sealed class StationLayout
     {
         var parts = new List<string>();
         foreach (TrackRow row in Rows)
-            parts.Add($"{row.Edges.Count}e@{row.Lateral:F1}m {RowStops(row)}st{(row.Left.DeadEnd ? " L-dead" : "")}{(row.Right.DeadEnd ? " R-dead" : "")}");
-        return $"{Rows.Count} track(s){(EndsFaceStreet ? ", facing street" : "")}, {Sidings.Count} siding edge(s): " + string.Join("; ", parts);
+            parts.Add($"{(row.Metro ? "metro " : "")}{row.Edges.Count}e@{row.Lateral:F1}m {RowStops(row)}st{(row.FacesStreet ? " street" : "")}{(row.Left.DeadEnd ? " L-dead" : "")}{(row.Right.DeadEnd ? " R-dead" : "")}");
+        return $"{Rows.Count} track(s) in {_directionGroups} direction group(s), {Sidings.Count} siding edge(s): " + string.Join("; ", parts);
     }
 
     private int RowStops(TrackRow row)
@@ -341,12 +403,12 @@ internal sealed class StationLayout
         foreach (ConnectedEdge item in entityManager.GetBuffer<ConnectedEdge>(node, true))
             connected.Add(item.m_Edge);
         foreach (Entity edge in connected)
-            if (HasTrainTrack(entityManager, edge))
+            if (HasRailTrack(entityManager, edge))
                 edges.Add(edge);
         return edges;
     }
 
-    /// <summary>True when the station or one of its upgrades has railway track.</summary>
+    /// <summary>True when the station or one of its upgrades has railway or metro track.</summary>
     public static bool IsRailwayStation(EntityManager entityManager, Entity station)
     {
         var nets = new HashSet<Entity>();
@@ -357,19 +419,19 @@ internal sealed class StationLayout
     private static bool HasRailwayEdge(EntityManager entityManager, HashSet<Entity> nets)
     {
         foreach (Entity net in nets)
-            if (entityManager.HasComponent<Edge>(net) && HasTrainTrack(entityManager, net))
+            if (entityManager.HasComponent<Edge>(net) && HasRailTrack(entityManager, net))
                 return true;
         return false;
     }
 
-    public static bool HasTrainTrack(EntityManager entityManager, Entity edge)
+    public static bool HasRailTrack(EntityManager entityManager, Entity edge, TrackTypes types = StationNets.RailTypes)
     {
         if (!entityManager.Exists(edge)
             || entityManager.HasComponent<Deleted>(edge)
             || !entityManager.HasBuffer<SubLane>(edge))
             return false;
         foreach (SubLane subLane in entityManager.GetBuffer<SubLane>(edge, true))
-            if (StationNets.IsTrainLane(entityManager, subLane.m_SubLane))
+            if (StationNets.IsRailLane(entityManager, subLane.m_SubLane, types))
                 return true;
         return false;
     }
@@ -386,10 +448,11 @@ internal sealed class StationLayout
         float3 axis,
         float3 side,
         float3 origin,
-        List<Entity> platformEdges)
+        List<Entity> platformEdges,
+        List<TrackRow> rows)
     {
         var spans = new Dictionary<TrackRow, float2>();
-        foreach (TrackRow row in Rows)
+        foreach (TrackRow row in rows)
         {
             float2 span = new float2(float.MaxValue, float.MinValue);
             foreach (Entity edge in row.Edges)
@@ -412,7 +475,7 @@ internal sealed class StationLayout
 
             TrackRow? nearest = null;
             float best = StopTrackDistance;
-            foreach (TrackRow row in Rows)
+            foreach (TrackRow row in rows)
             {
                 float2 span = spans[row];
                 if (along < span.x - StopTrackDistance || along > span.y + StopTrackDistance)
@@ -427,12 +490,12 @@ internal sealed class StationLayout
                 nearest.StopCount++;
         }
 
-        if (!Rows.Exists(row => row.StopCount > 0))
+        if (!rows.Exists(row => row.StopCount > 0))
             return;
-        foreach (TrackRow row in Rows.FindAll(row => row.StopCount == 0))
+        foreach (TrackRow row in rows.FindAll(row => row.StopCount == 0))
             foreach (Entity edge in row.Edges)
                 platformEdges.Remove(edge);
-        Rows.RemoveAll(row => row.StopCount == 0);
+        rows.RemoveAll(row => row.StopCount == 0);
     }
 
     /// <summary>
@@ -457,7 +520,7 @@ internal sealed class StationLayout
             else if (entityManager.HasComponent<Game.Objects.Attached>(stop))
             {
                 Entity parent = entityManager.GetComponentData<Game.Objects.Attached>(stop).m_Parent;
-                if (entityManager.HasComponent<Edge>(parent) && HasTrainTrack(entityManager, parent))
+                if (entityManager.HasComponent<Edge>(parent) && HasRailTrack(entityManager, parent))
                     stopEdges.Add(parent);
                 else
                     AddLaneOwner(entityManager, parent, stopEdges);
@@ -473,7 +536,7 @@ internal sealed class StationLayout
 
     private static void AddLaneOwner(EntityManager entityManager, Entity lane, HashSet<Entity> edges)
     {
-        if (!StationNets.IsTrainLane(entityManager, lane) || !entityManager.HasComponent<Owner>(lane))
+        if (!StationNets.IsRailLane(entityManager, lane) || !entityManager.HasComponent<Owner>(lane))
             return;
         Entity owner = entityManager.GetComponentData<Owner>(lane).m_Owner;
         if (entityManager.HasComponent<Edge>(owner))
@@ -494,7 +557,7 @@ internal sealed class StationLayout
         return false;
     }
 
-    private static bool IsPlatformEdge(EntityManager entityManager, Entity net)
+    private static bool IsPlatformEdge(EntityManager entityManager, Entity net, TrackTypes type)
     {
         if (!entityManager.Exists(net)
             || !entityManager.HasComponent<Edge>(net)
@@ -504,7 +567,7 @@ internal sealed class StationLayout
         foreach (SubLane subLane in entityManager.GetBuffer<SubLane>(net, true))
         {
             Entity lane = subLane.m_SubLane;
-            if (StationNets.IsTrainLane(entityManager, lane)
+            if (StationNets.IsRailLane(entityManager, lane, type)
                 && (entityManager.GetComponentData<TrackLane>(lane).m_Flags & TrackLaneFlags.Station) != 0)
                 return true;
         }

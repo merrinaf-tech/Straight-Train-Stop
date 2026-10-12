@@ -19,7 +19,6 @@ public sealed partial class StationJunctionLockUISystem : UISystemBase
     private ValueBinding<string> _rows = null!;
     private ValueBinding<int> _removedCount = null!;
     private ValueBinding<string> _status = null!;
-    private ValueBinding<bool> _endsFaceStreet = null!;
     private Entity _lastSelection;
     private int _lastRevision = -1;
 
@@ -34,7 +33,6 @@ public sealed partial class StationJunctionLockUISystem : UISystemBase
         AddBinding(_rows = new ValueBinding<string>(Group, "tracks", "[]"));
         AddBinding(_removedCount = new ValueBinding<int>(Group, "removedCount", 0));
         AddBinding(_status = new ValueBinding<string>(Group, "junctionStatus", string.Empty));
-        AddBinding(_endsFaceStreet = new ValueBinding<bool>(Group, "endsFaceStreet", false));
 
         // One int keeps the binding to a single argument: row * 4 + side * 2 + (on ? 1 : 0).
         AddBinding(new TriggerBinding<int>(Group, "setTrackSide", code =>
@@ -61,7 +59,6 @@ public sealed partial class StationJunctionLockUISystem : UISystemBase
         _stationSelected.Update(state.IsStation);
         _rows.Update(ToJson(state));
         _removedCount.Update(state.RemovedCount);
-        _endsFaceStreet.Update(state.EndsFaceStreet);
 
         string message = string.Empty;
         if (state.IsStation)
@@ -75,8 +72,9 @@ public sealed partial class StationJunctionLockUISystem : UISystemBase
     }
 
     /// <summary>
-    /// [{"l":true,"r":false,"lo":true,"ro":false}, ...], one entry per platform track: each end's
-    /// switch, and whether the end is open (false where the track stops, which gets no switch).
+    /// [{"l":true,"r":false,"lo":true,"ro":false,"m":false,"fs":false}, ...], one entry per
+    /// platform track: each end's switch, whether the end is open (false where the track stops,
+    /// which gets no switch), whether it is a metro track, and whether its ends are far and street.
     /// </summary>
     private static string ToJson(StationLockStatus state)
     {
@@ -90,6 +88,8 @@ public sealed partial class StationJunctionLockUISystem : UISystemBase
                 .Append(",\"r\":").Append(row.Right ? "true" : "false")
                 .Append(",\"lo\":").Append(row.LeftOpen ? "true" : "false")
                 .Append(",\"ro\":").Append(row.RightOpen ? "true" : "false")
+                .Append(",\"m\":").Append(row.Metro ? "true" : "false")
+                .Append(",\"fs\":").Append(row.FacesStreet ? "true" : "false")
                 .Append('}');
         }
         return json.Append(']').ToString();

@@ -59,32 +59,34 @@ internal readonly struct RowStatus
     public readonly bool Right;
     public readonly bool LeftOpen;
     public readonly bool RightOpen;
+    public readonly bool Metro;
+    public readonly bool FacesStreet;
 
-    public RowStatus(bool left, bool right, bool leftOpen, bool rightOpen)
+    public RowStatus(bool left, bool right, bool leftOpen, bool rightOpen, bool metro, bool facesStreet)
     {
         Left = left;
         Right = right;
         LeftOpen = leftOpen;
         RightOpen = rightOpen;
+        Metro = metro;
+        FacesStreet = facesStreet;
     }
 }
 
 internal readonly struct StationLockStatus
 {
     public static readonly StationLockStatus NotAStation =
-        new StationLockStatus(false, new List<RowStatus>(), 0, false);
+        new StationLockStatus(false, new List<RowStatus>(), 0);
 
     public readonly bool IsStation;
     public readonly List<RowStatus> Rows;
     public readonly int RemovedCount;
-    public readonly bool EndsFaceStreet;
 
-    public StationLockStatus(bool isStation, List<RowStatus> rows, int removed, bool endsFaceStreet)
+    public StationLockStatus(bool isStation, List<RowStatus> rows, int removed)
     {
         IsStation = isStation;
         Rows = rows;
         RemovedCount = removed;
-        EndsFaceStreet = endsFaceStreet;
     }
 }
 
@@ -186,10 +188,11 @@ public sealed partial class StationJunctionLockSystem : GameSystemBase
         });
         _passengerStopQuery = GetEntityQuery(new EntityQueryDesc
         {
-            All = new[]
+            All = new[] { ComponentType.ReadOnly<Owner>() },
+            Any = new[]
             {
                 ComponentType.ReadOnly<Game.Routes.TrainStop>(),
-                ComponentType.ReadOnly<Owner>()
+                ComponentType.ReadOnly<Game.Routes.SubwayStop>()
             },
             None = new[]
             {
@@ -304,9 +307,11 @@ public sealed partial class StationJunctionLockSystem : GameSystemBase
                 (left & bit) != 0,
                 (right & bit) != 0,
                 !row.Left.DeadEnd,
-                !row.Right.DeadEnd));
+                !row.Right.DeadEnd,
+                row.Metro,
+                row.FacesStreet));
         }
-        return new StationLockStatus(true, rows, removed, layout.EndsFaceStreet);
+        return new StationLockStatus(true, rows, removed);
     }
 
     /// <summary>
@@ -601,7 +606,7 @@ public sealed partial class StationJunctionLockSystem : GameSystemBase
 
         foreach (Entity lane in lanes)
         {
-            if (!StationNets.IsTrainLane(EntityManager, lane)
+            if (!StationNets.IsRailLane(EntityManager, lane)
                 || !EntityManager.HasComponent<Curve>(lane)
                 || EntityManager.HasComponent<Deleted>(lane))
                 continue;

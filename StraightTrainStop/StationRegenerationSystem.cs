@@ -9,7 +9,7 @@ namespace StraightTrainStop
 {
 
 /// <summary>
-/// Marks a station's railway edges and their nodes updated on request, so LaneSystem regenerates
+/// Marks a station's railway and metro edges and their nodes updated on request, so LaneSystem regenerates
 /// the station's track lanes. Roads, paths and other nets of the station and its upgrades are left
 /// alone: updating all of them right after a load is the likely reason a station lost its road
 /// connection after a reload. StationJunctionLockSystem then removes the lane changes of the
@@ -57,7 +57,7 @@ public sealed partial class StationRegenerationSystem : GameSystemBase
         var tracks = new HashSet<Entity>();
         foreach (Entity owner in owners)
         {
-            if (!EntityManager.HasComponent<Game.Net.Edge>(owner) || !StationLayout.HasTrainTrack(EntityManager, owner))
+            if (!EntityManager.HasComponent<Game.Net.Edge>(owner) || !StationLayout.HasRailTrack(EntityManager, owner))
                 continue;
             Game.Net.Edge ends = EntityManager.GetComponentData<Game.Net.Edge>(owner);
             tracks.Add(owner);
