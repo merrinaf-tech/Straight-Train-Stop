@@ -12,6 +12,6 @@ It uses the game's own lane pipeline: the station's lanes are regenerated and th
 
 Removed lane changes are not part of the save. If the mod is uninstalled, a station it changed stays without them until its lanes are regenerated, for example by upgrading or rebuilding the station; switching every station off first avoids this.
 
-Version 1.0.3 targets Cities: Skylines II 1.6.*.
+Version 1.0.4 targets Cities: Skylines II 1.6.*.
 
 [Paradox Mods](https://mods.paradoxplaza.com/mods/161180/Windows) · [Forum thread](https://forum.paradoxplaza.com/forum/threads/straight-train-stop-mod.1943001/) · MIT licence, see [LICENSE](LICENSE).

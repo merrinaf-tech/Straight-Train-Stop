@@ -14,7 +14,7 @@ public sealed class Mod : IMod
 
     public void OnLoad(UpdateSystem updateSystem)
     {
-        Log.Info("Loading Straight Train Stop v1.0.3");
+        Log.Info("Loading Straight Train Stop v1.0.4");
 
         // Runs right after LaneSystem has generated lanes and before LaneReferencesSystem files them
         // under their owners, so a removed crossover goes through the same path as any lane

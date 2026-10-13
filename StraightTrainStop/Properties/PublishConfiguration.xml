@@ -11,7 +11,7 @@
     website, copy it back in here before the next publish, or the next publish deletes it.
 
     Published as 161180 on 2026-09-28 (1.0.0); 1.0.1 on 2026-10-11; 1.0.2 on 2026-10-12;
-    1.0.3 on 2026-10-13. From now on NewVersion /
+    1.0.3 and 1.0.4 on 2026-10-13. From now on NewVersion /
     Update are the commands.
   -->
   <ModId Value="161180" />
@@ -26,15 +26,16 @@
 
 Select a railway station: **Straight-only platforms** is under Visual Customisation, or in the info panel. Switch on a track end and trains reach that platform only straight on. Choices are saved with the city.
 
-Works with metro stations too. Tram stops have a switch as well, for the tram crossings next to them.
+Works with metro and tram stations too.
 
 ## Before you install
 
 Removed lane changes are not part of the save. If you uninstall the mod, a station you changed stays without them until its tracks are regenerated, for example by upgrading or rebuilding the station. Switch every station off before uninstalling to avoid this.
   </LongDescription>
   <Thumbnail Value="Properties/Thumbnail.png" />
-  <!-- Once declared here this file governs the screenshots: remove a line and the next
-       publish removes the picture. -->
+  <!-- Removing a line here does NOT remove the picture from the listing: dropping
+       straight-train-stop-01.png before the 1.0.3 NewVersion left it online (2026-10-13).
+       Take a picture down on the website, and keep this list matching it. -->
   <Screenshot Value="Properties/Screenshots/straight-train-stop-02.png" />
   <Tag Value="Code Mod" />
 
@@ -42,12 +43,12 @@ Removed lane changes are not part of the save. If you uninstall the mod, a stati
 
   <ExternalLink Type="github" Url="https://github.com/merrinaf-tech/Straight-Train-Stop" />
   <ExternalLink Type="kofi" Url="https://ko-fi.com/fabiozsche" />
-  <ModVersion Value="1.0.3" />
+  <ModVersion Value="1.0.4" />
   <GameVersion Value="1.6.*" />
   <AccessLevel Value="Public" />
   <!-- The live version's changes. Update refuses an empty ChangeLog, so after a NewVersion these
        lines stay until the next one replaces them with that version's changes only. -->
   <ChangeLog>
-- Tram stops get a switch that removes the tram crossings next to them.
+- Fixed broken connections at nearby track nodes when toggling station crossovers.
   </ChangeLog>
 </Publish>

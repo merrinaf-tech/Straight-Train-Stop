@@ -33,6 +33,8 @@ public sealed partial class StationRegenerationSystem : GameSystemBase
     /// with the edges meeting there. The edges' lanes keep a list of the node lanes they overlap;
     /// marking only the node left that list pointing at a deleted crossing, and a car checking the
     /// overlap later took the game down - intermittently, at busy intersections (2026-10-12/13).
+    /// Both ends of each included edge must also be updated, so its regenerated lanes still
+    /// connect to the node lanes at the far end.
     /// </summary>
     internal void RequestNodes(IEnumerable<Entity> nodes)
     {
@@ -114,7 +116,11 @@ public sealed partial class StationRegenerationSystem : GameSystemBase
             if (EntityManager.Exists(edge)
                 && !EntityManager.HasComponent<Deleted>(edge)
                 && (!railOnly || StationLayout.HasRailTrack(EntityManager, edge)))
-                output.Add(edge);
+                // LaneSystem processes Updated owners independently: updating an edge does not
+                // update either endpoint for us. Its lane indices can change during regeneration;
+                // leaving the far node untouched breaks connections outside the station/stop.
+                // Add endpoints without walking their other edges, keeping this update local.
+                StationNets.AddNetOwner(EntityManager, edge, output);
     }
 
     private void MarkUpdated(Entity net)
