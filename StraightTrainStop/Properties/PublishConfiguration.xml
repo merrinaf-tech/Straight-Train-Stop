@@ -10,7 +10,8 @@
     So: this file is the single source of truth. If you add a link, a tag or a dependency on the
     website, copy it back in here before the next publish, or the next publish deletes it.
 
-    Published as 161180 on 2026-09-28 (1.0.0); 1.0.1 on 2026-10-11; 1.0.2 on 2026-10-12. From now on NewVersion /
+    Published as 161180 on 2026-09-28 (1.0.0); 1.0.1 on 2026-10-11; 1.0.2 on 2026-10-12;
+    1.0.3 on 2026-10-13. From now on NewVersion /
     Update are the commands.
   -->
   <ModId Value="161180" />
