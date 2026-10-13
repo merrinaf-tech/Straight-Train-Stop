@@ -19,6 +19,7 @@ namespace StraightTrainStop
 public sealed partial class StationRegenerationSystem : GameSystemBase
 {
     private readonly HashSet<Entity> _requests = new HashSet<Entity>();
+    private readonly HashSet<Entity> _nodeRequests = new HashSet<Entity>();
 
     /// <summary>Has LaneSystem regenerate one station's lanes on the next frame.</summary>
     internal void RequestRegenerate(Entity station)
@@ -27,10 +28,23 @@ public sealed partial class StationRegenerationSystem : GameSystemBase
             _requests.Add(station);
     }
 
+    /// <summary>
+    /// Has LaneSystem regenerate the lanes of single nodes, such as those by a tram stop, together
+    /// with the edges meeting there. The edges' lanes keep a list of the node lanes they overlap;
+    /// marking only the node left that list pointing at a deleted crossing, and a car checking the
+    /// overlap later took the game down - intermittently, at busy intersections (2026-10-12/13).
+    /// </summary>
+    internal void RequestNodes(IEnumerable<Entity> nodes)
+    {
+        foreach (Entity node in nodes)
+            if (node != Entity.Null)
+                _nodeRequests.Add(node);
+    }
+
     [Preserve]
     protected override void OnUpdate()
     {
-        if (_requests.Count == 0)
+        if (_requests.Count == 0 && _nodeRequests.Count == 0)
             return;
 
         try
@@ -40,6 +54,19 @@ public sealed partial class StationRegenerationSystem : GameSystemBase
             _requests.Clear();
             foreach (Entity station in requests)
                 RegenerateStation(station);
+
+            var nodes = new List<Entity>(_nodeRequests);
+            _nodeRequests.Clear();
+            var marked = new HashSet<Entity>();
+            foreach (Entity node in nodes)
+            {
+                if (!EntityManager.Exists(node) || EntityManager.HasComponent<Deleted>(node))
+                    continue;
+                marked.Add(node);
+                AddConnectedEdges(node, marked, false);
+            }
+            foreach (Entity net in marked)
+                MarkUpdated(net);
         }
         catch (Exception exception)
         {
@@ -55,18 +82,45 @@ public sealed partial class StationRegenerationSystem : GameSystemBase
         var owners = new HashSet<Entity>();
         StationNets.Collect(EntityManager, station, owners);
         var tracks = new HashSet<Entity>();
+        var nodes = new HashSet<Entity>();
         foreach (Entity owner in owners)
         {
             if (!EntityManager.HasComponent<Game.Net.Edge>(owner) || !StationLayout.HasRailTrack(EntityManager, owner))
                 continue;
             Game.Net.Edge ends = EntityManager.GetComponentData<Game.Net.Edge>(owner);
             tracks.Add(owner);
-            tracks.Add(ends.m_Start);
-            tracks.Add(ends.m_End);
+            nodes.Add(ends.m_Start);
+            nodes.Add(ends.m_End);
+        }
+        // The rail edges meeting the station's nodes from outside too, so their overlap lists are
+        // rebuilt along with the lanes they overlap (see RequestNodes).
+        foreach (Entity node in nodes)
+        {
+            tracks.Add(node);
+            AddConnectedEdges(node, tracks, true);
         }
         foreach (Entity net in tracks)
-            if (EntityManager.Exists(net) && !EntityManager.HasComponent<Updated>(net))
-                EntityManager.AddComponent<Updated>(net);
+            MarkUpdated(net);
+    }
+
+    private void AddConnectedEdges(Entity node, HashSet<Entity> output, bool railOnly)
+    {
+        if (!EntityManager.Exists(node) || !EntityManager.HasBuffer<Game.Net.ConnectedEdge>(node))
+            return;
+        var edges = new List<Entity>();
+        foreach (Game.Net.ConnectedEdge connected in EntityManager.GetBuffer<Game.Net.ConnectedEdge>(node, true))
+            edges.Add(connected.m_Edge);
+        foreach (Entity edge in edges)
+            if (EntityManager.Exists(edge)
+                && !EntityManager.HasComponent<Deleted>(edge)
+                && (!railOnly || StationLayout.HasRailTrack(EntityManager, edge)))
+                output.Add(edge);
+    }
+
+    private void MarkUpdated(Entity net)
+    {
+        if (EntityManager.Exists(net) && !EntityManager.HasComponent<Deleted>(net) && !EntityManager.HasComponent<Updated>(net))
+            EntityManager.AddComponent<Updated>(net);
     }
 }
 

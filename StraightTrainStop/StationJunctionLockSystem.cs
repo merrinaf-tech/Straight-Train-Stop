@@ -126,6 +126,7 @@ public sealed partial class StationJunctionLockSystem : GameSystemBase
     private EntityQuery _trainQuery;
     private EntityQuery _passengerStopQuery;
     private StationRegenerationSystem _regeneration = null!;
+    private RailVehicleLanes _vehicleLanes = null!;
     private readonly Dictionary<Entity, int> _removedCounts = new Dictionary<Entity, int>();
     private readonly HashSet<Entity> _deferredStations = new HashSet<Entity>();
     private readonly List<SideRequest> _requests = new List<SideRequest>();
@@ -158,6 +159,7 @@ public sealed partial class StationJunctionLockSystem : GameSystemBase
     {
         base.OnCreate();
         _regeneration = World.GetOrCreateSystemManaged<StationRegenerationSystem>();
+        _vehicleLanes = new RailVehicleLanes(desc => GetEntityQuery(desc));
         _lockedStationQuery = GetEntityQuery(new EntityQueryDesc
         {
             All = new[]
@@ -527,6 +529,7 @@ public sealed partial class StationJunctionLockSystem : GameSystemBase
         var layouts = new Dictionary<Entity, StationLayout>();
         foreach (Entity station in touched)
             layouts[station] = StationLayout.Build(EntityManager, station, stops);
+        HashSet<Entity> inUse = _vehicleLanes.Collect(EntityManager);
 
         var lanesByNode = new Dictionary<Entity, List<Entity>>();
         foreach (Entity lane in regenerated)
@@ -550,7 +553,7 @@ public sealed partial class StationJunctionLockSystem : GameSystemBase
             int rerouted = 0;
             foreach (Entity lane in branches)
             {
-                if (IsLaneOccupied(lane))
+                if (IsLaneOccupied(lane) || inUse.Contains(lane))
                 {
                     busy++;
                     continue;
@@ -669,7 +672,7 @@ public sealed partial class StationJunctionLockSystem : GameSystemBase
     /// Horizontal distance between the lane's end points measured across its mean direction:
     /// about zero for a plain arc, about the track spacing for an S-shaped crossover.
     /// </summary>
-    private static float SidewaysShift(Bezier4x3 bezier)
+    internal static float SidewaysShift(Bezier4x3 bezier)
     {
         float3 start = math.normalizesafe(MathUtils.StartTangent(bezier) * new float3(1f, 0f, 1f));
         float3 end = math.normalizesafe(MathUtils.EndTangent(bezier) * new float3(1f, 0f, 1f));

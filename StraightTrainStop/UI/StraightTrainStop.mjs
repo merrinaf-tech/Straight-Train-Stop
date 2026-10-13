@@ -3,7 +3,7 @@
  *
  * Id: StraightTrainStop
  * Author: Fabiozsche
- * Version: 1.0.2
+ * Version: 1.0.3
  * Dependencies:
  */
 
@@ -24,6 +24,8 @@ const h = React.createElement;
 const stationSelected$ = api.bindValue(GROUP, "stationSelected", false);
 const tracks$ = api.bindValue(GROUP, "tracks", "[]");
 const status$ = api.bindValue(GROUP, "junctionStatus", "");
+const tramStop$ = api.bindValue(GROUP, "tramStop", false);
+const tramLocked$ = api.bindValue(GROUP, "tramLocked", false);
 
 // The game's own panel pieces, the ones the Historical row uses, looked up when the module
 // registers. Where any is missing the panel falls back to the card below, so it never vanishes.
@@ -225,11 +227,43 @@ function TrackGroup({ items, mixed }) {
   );
 }
 
+// A tram stop: one switch for the crossings at the road nodes either side of it.
+function TramStopControl({ locked, status }) {
+  const label = "Straight tram tracks";
+  if (vanilla.InfoRow && vanilla.Checkbox && vanilla.InfoSection) {
+    return h(
+      vanilla.InfoSection,
+      { disableFocus: true },
+      h(vanilla.InfoRow, {
+        left: label,
+        right: h(vanilla.Checkbox, { checked: !!locked, onChange: (value) => send("setTramStop", value) }),
+      }),
+      status ? h(vanilla.InfoRow, { subRow: true, subRowDimmed: true, left: status }) : null
+    );
+  }
+  return h(
+    "div",
+    { style: cardStyle },
+    h(
+      "div",
+      { style: headerStyle },
+      h("div", { style: titleStyle }, label),
+      h(Toggle, { label: locked ? "ON" : "OFF", active: !!locked, onClick: () => send("setTramStop", !locked) })
+    ),
+    status ? h("div", { style: statusStyle }, status) : null
+  );
+}
+
 function StationJunctionControl() {
   const stationSelected = api.useValue(stationSelected$);
   const tracksJson = api.useValue(tracks$);
   const status = api.useValue(status$);
+  const tramStop = api.useValue(tramStop$);
+  const tramLocked = api.useValue(tramLocked$);
 
+  if (tramStop) {
+    return h(TramStopControl, { locked: tramLocked, status });
+  }
   if (!stationSelected) {
     return null;
   }

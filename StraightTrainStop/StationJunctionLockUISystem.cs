@@ -15,6 +15,10 @@ public sealed partial class StationJunctionLockUISystem : UISystemBase
 
     private SelectedInfoUISystem _selectedInfo = null!;
     private StationJunctionLockSystem _junctionLocks = null!;
+    private TramCrossingSystem _tramCrossings = null!;
+    private ValueBinding<bool> _tramStop = null!;
+    private ValueBinding<bool> _tramLocked = null!;
+    private int _lastTramRevision = -1;
     private ValueBinding<bool> _stationSelected = null!;
     private ValueBinding<string> _rows = null!;
     private ValueBinding<int> _removedCount = null!;
@@ -28,6 +32,11 @@ public sealed partial class StationJunctionLockUISystem : UISystemBase
         base.OnCreate();
         _selectedInfo = World.GetOrCreateSystemManaged<SelectedInfoUISystem>();
         _junctionLocks = World.GetOrCreateSystemManaged<StationJunctionLockSystem>();
+        _tramCrossings = World.GetOrCreateSystemManaged<TramCrossingSystem>();
+        AddBinding(_tramStop = new ValueBinding<bool>(Group, "tramStop", false));
+        AddBinding(_tramLocked = new ValueBinding<bool>(Group, "tramLocked", false));
+        AddBinding(new TriggerBinding<bool>(Group, "setTramStop", enabled =>
+            _tramCrossings.Request(_selectedInfo.selectedEntity, enabled)));
         World.GetOrCreateSystemManaged<StationTracksSection>();
         AddBinding(_stationSelected = new ValueBinding<bool>(Group, "stationSelected", false));
         AddBinding(_rows = new ValueBinding<string>(Group, "tracks", "[]"));
@@ -50,11 +59,23 @@ public sealed partial class StationJunctionLockUISystem : UISystemBase
     {
         Entity selected = _selectedInfo.selectedEntity;
         int revision = _junctionLocks.Revision;
-        if (selected == _lastSelection && revision == _lastRevision)
+        int tramRevision = _tramCrossings.Revision;
+        if (selected == _lastSelection && revision == _lastRevision && tramRevision == _lastTramRevision)
             return;
 
         _lastSelection = selected;
         _lastRevision = revision;
+        _lastTramRevision = tramRevision;
+
+        bool tramStop = _tramCrossings.IsTramStop(selected);
+        _tramStop.Update(tramStop);
+        _tramLocked.Update(tramStop && _tramCrossings.IsLocked(selected));
+        if (tramStop)
+        {
+            _stationSelected.Update(false);
+            _status.Update(_tramCrossings.LastStop == selected ? _tramCrossings.LastMessage : string.Empty);
+            return;
+        }
         StationLockStatus state = _junctionLocks.Inspect(selected);
         _stationSelected.Update(state.IsStation);
         _rows.Update(ToJson(state));

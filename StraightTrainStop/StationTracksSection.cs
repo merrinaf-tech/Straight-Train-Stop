@@ -17,6 +17,7 @@ namespace StraightTrainStop
 public sealed partial class StationTracksSection : InfoSectionBase
 {
     private VisualCustomizeSection _visualCustomize = null!;
+    private TramCrossingSystem _tramCrossings = null!;
 
     protected override string group => nameof(StationTracksSection);
 
@@ -25,6 +26,7 @@ public sealed partial class StationTracksSection : InfoSectionBase
     {
         base.OnCreate();
         _visualCustomize = World.GetOrCreateSystemManaged<VisualCustomizeSection>();
+        _tramCrossings = World.GetOrCreateSystemManaged<TramCrossingSystem>();
         m_InfoUISystem.AddMiddleSection(this);
     }
 
@@ -35,7 +37,8 @@ public sealed partial class StationTracksSection : InfoSectionBase
     [Preserve]
     protected override void OnUpdate()
     {
-        visible = !_visualCustomize.visible && IsRailwayStation(selectedEntity);
+        visible = !_visualCustomize.visible
+            && (IsRailwayStation(selectedEntity) || _tramCrossings.IsTramStop(selectedEntity));
     }
 
     protected override void OnProcess()
